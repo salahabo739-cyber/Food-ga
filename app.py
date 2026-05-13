@@ -1,166 +1,104 @@
 import streamlit as st
-import pandas as pd
 import re
 from datetime import datetime
-import io
 
 st.set_page_config(
-    page_title="CheeseGuard • Analyzer",
+    page_title="CheeseGuard Pro",
     page_icon="🧀",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
-# Custom CSS فخم
+# ---------------- UI ----------------
 st.markdown("""
 <style>
-    .main {background-color: #0E1117;}
-    .big-font {font-size: 52px !important; font-weight: bold; color: #00FFAA;}
-    .verdict-good {background: linear-gradient(90deg, #00C853, #64DD17); color: white; padding: 25px; border-radius: 15px; text-align: center;}
-    .verdict-warn {background: linear-gradient(90deg, #FFB300, #FF8F00); color: black; padding: 25px; border-radius: 15px; text-align: center;}
-    .verdict-bad {background: linear-gradient(90deg, #F44336, #D32F2F); color: white; padding: 25px; border-radius: 15px; text-align: center;}
-    .ingredient-card {background-color: #1E242F; padding: 18px; border-radius: 12px; margin: 8px 0; border-left: 4px solid #00FFAA;}
+.big {font-size:50px; font-weight:bold; color:#00ffcc;}
+.card {padding:15px; border-radius:12px; background:#1e1e1e; margin:10px 0;}
+.good {background:linear-gradient(90deg,#00c853,#64dd17); padding:15px; border-radius:12px;}
+.warn {background:linear-gradient(90deg,#ffb300,#ff8f00); padding:15px; border-radius:12px;}
+.bad {background:linear-gradient(90deg,#f44336,#d32f2f); padding:15px; border-radius:12px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<h1 class="big-font">🧀 CheeseGuard Pro</h1>', unsafe_allow_html=True)
-st.markdown("**محلل مكونات الجبن الذكي • النسخة الاحترافية**")
+st.markdown('<div class="big">🧀 CheeseGuard Pro</div>', unsafe_allow_html=True)
+st.write("تحليل مكونات الجبن بطريقة ذكية")
 
-# Sidebar
-with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/cheese.png", width=100)
-    st.title("CheeseGuard")
-    st.divider()
-    language = st.radio("اللغة", ["العربية", "English"])
-    st.info("🛡️ لأغراض توعوية فقط - ليس بديل عن استشارة متخصص")
-
-tab1, tab2, tab3 = st.tabs(["🔍 تحليل جديد", "📖 تاريخ التحليلات", "ℹ️ عن التطبيق"])
-
-# ====================== قاعدة البيانات ======================
+# ---------------- DB ----------------
 harmful_db = {
-    "natamycin": "مضاد فطريات - شائع في الجبن المبشور",
-    "cellulose": "بودرة الخشب (مضاد تكتل)",
-    "sodium phosphate": "فوسفات الصوديوم - قد يؤثر على الكلى",
-    "carrageenan": "مثخن - قد يسبب التهابات معوية",
-    "msg": "غلوتامات أحادية الصوديوم",
-    "potato starch": "نشا بطاطس (مضاد تكتل)",
+    "natamycin": "مضاد فطريات",
+    "cellulose": "بودرة خشب / مضاد تكتل",
+    "sodium phosphate": "قد يؤثر على الكلى",
+    "carrageenan": "قد يسبب مشاكل هضمية",
+    "msg": "منكهات صناعية",
     "artificial color": "ألوان صناعية",
-    "e202": "سوربات البوتاسيوم",
-    "e235": "ناتامايسين"
+    "e202": "مادة حافظة",
+    "e235": "مادة حافظة"
 }
 
-def analyze_ingredients(text):
-    text_lower = text.lower()
-    ingredients = [ing.strip() for ing in re.split(r'[,;•]', text) if ing.strip()]
+# ---------------- Logic ----------------
+def analyze(text):
+    ingredients = [i.strip() for i in re.split(r"[;,•]", text) if i.strip()]
     
+    score = 100
     warnings = []
-    score = 88
-    harmful_found = []
-    
+
     for ing in ingredients:
         for bad, desc in harmful_db.items():
             if bad in ing.lower():
-                warnings.append(f"⚠️ {ing} → {desc}")
-                harmful_found.append(ing)
-                score -= 16
-    
-    score = max(15, min(100, score))
-    
+                score -= 15
+                warnings.append(f"{ing} → {desc}")
+
+    score = max(10, score)
+
     if score > 75:
-        verdict = "✅ ممتاز - طبيعي"
-        color = "good"
+        status = "good"
+        verdict = "ممتاز"
     elif score > 50:
-        verdict = "⚠️ مقبول مع تحفظ"
-        color = "warn"
+        status = "warn"
+        verdict = "مقبول"
     else:
-        verdict = "❌ غير موصى به"
-        color = "bad"
-    
-    return {
-        "score": round(score),
-        "verdict": verdict,
-        "color": color,
-        "warnings": warnings,
-        "ingredients": ingredients,
-        "harmful_count": len(harmful_found),
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M")
-    }
+        status = "bad"
+        verdict = "غير جيد"
 
-# ====================== Tab 1: التحليل الجديد ======================
-with tab1:
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("📸 رفع صورة الليبل")
-        uploaded_file = st.file_uploader("ارفع صورة مكونات الجبن", type=["png", "jpg", "jpeg"])
-        
-        st.subheader("أو 📝 اكتب المكونات")
-        ingredients_text = st.text_area(
-            "الصق قائمة المكونات هنا",
-            height=120,
-            placeholder="Pasteurized Milk, Salt, Cultures, Rennet, Natamycin, Cellulose Powder..."
-        )
-        
-        analyze_btn = st.button("🚀 ابدأ التحليل", type="primary", use_container_width=True)
-    
-    if analyze_btn and (ingredients_text.strip() or uploaded_file):
-        with st.spinner("جاري التحليل الذكي..."):
-            text_to_analyze = ingredients_text
-            if uploaded_file:
-                text_to_analyze += "\n[تم رفع صورة - سيتم تحليلها بـ OCR في النسخة القادمة]"
-            
-            result = analyze_ingredients(text_to_analyze)
-            
-            # حفظ في التاريخ
-            if 'history' not in st.session_state:
-                st.session_state.history = []
-            st.session_state.history.append(result)
-            
-            # عرض النتيجة
-            if result["color"] == "good":
-                st.markdown(f'<div class="verdict-good"><h2>{result["verdict"]}</h2></div>', unsafe_allow_html=True)
-            elif result["color"] == "warn":
-                st.markdown(f'<div class="verdict-warn"><h2>{result["verdict"]}</h2></div>', unsafe_allow_html=True)
-            else:
-                st.markdown(f'<div class="verdict-bad"><h2>{result["verdict"]}</h2></div>', unsafe_allow_html=True)
-            
-            st.metric("التقييم الصحي", f"{result['score']}/100", delta=None)
-            
-            st.subheader("⚠️ التحذيرات")
-            for w in result["warnings"]:
-                st.warning(w)
-            
-            st.subheader("📋 كل المكونات")
-            for ing in result["ingredients"]:
-                st.markdown(f'<div class="ingredient-card">• {ing}</div>', unsafe_allow_html=True)
-            
-            # أزرار التصدير
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("📄 تصدير تقرير PDF"):
-                    st.success("تم تصدير التقرير (سيتم تفعيل PDF في النسخة القادمة)")
-            with col_b:
-                if st.button("📋 نسخ النتيجة"):
-                    st.success("تم النسخ!")
+    return ingredients, score, warnings, status, verdict
 
-# ====================== Tab 2: التاريخ ======================
-with tab2:
-    if 'history' in st.session_state and st.session_state.history:
-        st.subheader("تاريخ التحليلات السابقة")
-        for i, res in enumerate(reversed(st.session_state.history)):
-            st.markdown(f"**{res['timestamp']}** - {res['verdict']} ({res['score']}/100)")
-            st.progress(res['score']/100)
-            st.divider()
+
+# ---------------- Input ----------------
+text = st.text_area("اكتب المكونات هنا")
+
+if st.button("تحليل"):
+    if not text.strip():
+        st.error("اكتب مكونات الأول")
     else:
-        st.info("لم تقم بأي تحليل بعد")
+        ingredients, score, warnings, status, verdict = analyze(text)
 
-with tab3:
-    st.markdown("### CheeseGuard Pro v1.0")
-    st.write("تطبيق مصري احترافي لتحليل مكونات الجبن والألبان.")
+        if status == "good":
+            st.markdown(f'<div class="good">النتيجة: {verdict}</div>', unsafe_allow_html=True)
+        elif status == "warn":
+            st.markdown(f'<div class="warn">النتيجة: {verdict}</div>', unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="bad">النتيجة: {verdict}</div>', unsafe_allow_html=True)
 
----
+        st.metric("Score", f"{score}/100")
 
-### إزاي تشغله؟
+        st.subheader("Warnings")
+        for w in warnings:
+            st.warning(w)
 
-```bash
-streamlit run app.py
+        st.subheader("Ingredients")
+        for i in ingredients:
+            st.write("•", i)
+
+
+# ---------------- History ----------------
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if text and st.button("Save"):
+    st.session_state.history.append({
+        "text": text,
+        "time": datetime.now().strftime("%H:%M")
+    })
+
+st.subheader("History")
+for h in reversed(st.session_state.history):
+    st.write(h["time"], ":", h["text"])
